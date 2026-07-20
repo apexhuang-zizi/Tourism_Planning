@@ -221,6 +221,26 @@ details summary{color:var(--blue);font-size:.8em;cursor:pointer}
 </div>
 
 <div class="card">
+<h3>&#x1f9f3; 旅行模式</h3>
+<div class="radio-group"><label><input type="radio" name="travelMode" value="destination" checked><span>&#x1f3af; 目的地旅游</span></label><label><input type="radio" name="travelMode" value="journey"><span>&#x1f30d; 过程探索</span></label></div>
+<div class="hint" style="margin-top:6px">目的地旅游=往返规划含回程；过程探索=边走边游一路向前，绕路也要串起沿途经典景点，不考虑回程</div>
+</div>
+
+<div class="card">
+<h3>&#x1f30d; 景点偏好</h3>
+<div class="radio-group"><label><input type="radio" name="preference" value="nature"><span>&#x1f3d4;&#xfe0f; 自然风光</span></label><label><input type="radio" name="preference" value="culture"><span>&#x1f3db;&#xfe0f; 人文历史</span></label><label><input type="radio" name="preference" value="family"><span>&#x1f476; 亲子体验</span></label><label><input type="radio" name="preference" value="balanced" checked><span>&#x2696;&#xfe0f; 综合平衡</span></label></div>
+<div class="hint" style="margin-top:6px">每个偏好让AI侧重不同类型的景点推荐和行程节奏</div>
+</div>
+
+<div class="card">
+<h3>&#x1f4dd; 特别说明</h3>
+<div class="form-field">
+<textarea id="specialNotes" placeholder="有什么特别的要求？比如：想去某个特定的地方、有老人小孩需要无障碍、对某种食物过敏、想避开某类景点... 这些将直接写入AI提示词中" rows="3" style="width:100%;padding:10px 12px;background:#faf8f5;border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-size:.9em;font-family:inherit;resize:vertical;transition:border-color .2s" oninput="autoSaveSettings()"></textarea>
+</div>
+<div class="hint" style="margin-top:6px">此内容将作为高优先级指令写入AI提示词，AI会在规划时严格参考</div>
+</div>
+
+<div class="card">
 <h3>&#x1f5fa;&#xfe0f; 地图偏好</h3>
 <div class="radio-group"><label><input type="radio" name="mapType" value="高德" checked><span>&#x1f5fa;&#xfe0f; 高德地图</span></label><label><input type="radio" name="mapType" value="Google"><span>&#x1f310; Google Maps</span></label></div>
 <div class="hint" style="margin-top:6px">导航链接类型（路书内嵌地图始终使用高清卫星图）</div>
@@ -263,14 +283,16 @@ function loadState() {
   } catch(e) {}
   return {
     _version: VERSION,
-    apiProvider: 'deepseek',
+    apiProvider: 'gemini',
     apiKey: '',
     settings: {
       mode:'days', days:6, adults:2, kids:0, student:'no', kidsOver12:'no',
       originCity:'成都', destCity:'伊宁',
       mainTransport:'飞机', localTransport:'自驾',
       accommodation:'舒适型', intensity:'中',
-      driveTime:'8', altitude:'不限', mapType:'高德'
+      driveTime:'8', altitude:'不限', mapType:'高德',
+      travelMode:'destination', preference:'balanced',
+      specialNotes:''
     }
   };
 }
@@ -322,6 +344,9 @@ function applySettings(s) {
   if(s.driveTime){const r=document.querySelector('input[name=driveTime][value="'+s.driveTime+'"]');if(r)r.checked=true}
   if(s.altitude){const r=document.querySelector('input[name=altitude][value="'+s.altitude+'"]');if(r)r.checked=true}
   if(s.mapType){const r=document.querySelector('input[name=mapType][value="'+s.mapType+'"]');if(r)r.checked=true}
+  if(s.travelMode){const r=document.querySelector('input[name=travelMode][value="'+s.travelMode+'"]');if(r)r.checked=true}
+  if(s.preference){const r=document.querySelector('input[name=preference][value="'+s.preference+'"]');if(r)r.checked=true}
+  if(s.specialNotes!==undefined)document.getElementById('specialNotes').value=s.specialNotes;
 }
 function updateKidsField() {
   document.getElementById('kidsAgeField').style.display = (parseInt(document.getElementById('kids').value)||0) > 0 ? '' : 'none';
@@ -378,8 +403,16 @@ function toggleDateMode() {
 function collectFormData() {
   const mode = document.querySelector('input[name=dateMode]:checked').value;
   const d = { mode };
-  if (mode==='days') d.days = parseInt(document.getElementById('travelDays').value)||6;
-  else { d.start_date=document.getElementById('startDate').value; d.end_date=document.getElementById('endDate').value; }
+  if (mode==='days') { d.days = parseInt(document.getElementById('travelDays').value)||6; }
+  else {
+    d.start_date=document.getElementById('startDate').value;
+    d.end_date=document.getElementById('endDate').value;
+    if (d.start_date && d.end_date) {
+      const sd = new Date(d.start_date + 'T00:00:00');
+      const ed = new Date(d.end_date + 'T00:00:00');
+      d.days = Math.max(1, Math.ceil((ed - sd) / 86400000) + 1);
+    }
+  }
   d.adults=parseInt(document.getElementById('adults').value)||1;
   d.kids=parseInt(document.getElementById('kids').value)||0;
   d.student=document.getElementById('student').value;
@@ -393,6 +426,9 @@ function collectFormData() {
   d.driveTime=document.querySelector('input[name=driveTime]:checked').value;
   d.altitude=document.querySelector('input[name=altitude]:checked').value;
   d.mapType=document.querySelector('input[name=mapType]:checked').value;
+  d.travelMode=document.querySelector('input[name=travelMode]:checked').value;
+  d.preference=document.querySelector('input[name=preference]:checked').value;
+  d.specialNotes=document.getElementById('specialNotes').value.trim();
   return d;
 }
 function autoSaveSettings() {
@@ -442,7 +478,14 @@ const SYSTEM_PROMPT = `你是一个专业的旅游规划师AI。输出纯JSON（
 3.遵守驾车时间限制。4.遵守海拔限制。
 5.【导航链接必须用地图可识别的真实地名】gm_links里的起点和终点只能使用具体的景点全名、酒店名、餐厅名、机场名等地图App能搜到的真实地名（如"新疆赛里木湖风景区""新疆那拉提旅游风景区""伊宁机场"）。【⚠️关键】所有地名（景点、酒店、餐厅）必须加上省/市前缀（如"成都春熙路亚朵酒店"而非"亚朵酒店"），严禁只用连锁品牌名，避免导航跳到其他省份的同名地点。每个day至少给2个gm_links，严禁使用经纬度坐标（如43.12,81.45）、任何数字串、或者地图搜不到的简称/代号。每个day至少给2个gm_links。高德链接格式：https://ditu.amap.com/dir?from[name]=起点&from[lnglat]=lng,lat&to[name]=终点&to[lnglat]=lng,lat（lnglat参数可省略让高德自行解析地名）。Google链接格式：https://www.google.com/maps/dir/起点/终点。
 6.【航班信息必须详细】若用户选了飞机出行，drive_info里必须写清楚推荐航班号、起飞机场名称+三字码、降落机场名称+三字码、飞行时长、是否直飞（如"3U8557 成都双流(CTU)→伊宁(YIN) 4h5m 直飞"）；若有多班可列2-3个备选航班；并在tips中补充机场到市区交通方式。
-7.每个景点≥3个detailed sections，timeline每天≥4个时间点。8.budget拆大交通/小交通/住宿/饮食/门票/其他。【预算金额要求】所有金额均为单人人均（不是总费用）。total_low和total_high是单人人均预算，items里每项的"人均"字段也是单人费用。每项费用给具体数字（如"800元"）、说明字段写计算依据（如"往返机票×1人""3晚×300元/晚÷2人=450元/人"）。最后验证：各分项人均费用之和应等于total_low~total_high范围9.weather packing具体到单品（如"冲锋衣+抓绒内胆"）。10.waypoints真实坐标[经度,纬度]，每天4-10个点按行车顺序排列。route字段需写明当日预计里程（如"约180km"），且当日全程驾车距离不得超过最大驾车时间×60km（例如≤8h则≤480km）。`;
+7.每个景点≥3个detailed sections，timeline每天≥4个时间点。8.budget拆大交通/小交通/住宿/饮食/门票/其他。【预算金额要求】所有金额均为单人人均（不是总费用）。total_low和total_high是单人人均预算，items里每项的"人均"字段也是单人费用。每项费用给具体数字（如"800元"）、说明字段写计算依据（如"往返机票×1人""3晚×300元/晚÷2人=450元/人"）。最后验证：各分项人均费用之和应等于total_low~total_high范围9.weather packing具体到单品（如"冲锋衣+抓绒内胆"）。10.waypoints真实坐标[经度,纬度]，每天4-10个点按行车顺序排列。route字段需写明当日预计里程（如"约180km"），且当日全程驾车距离不得超过最大驾车时间×60km（例如≤8h则≤480km）。
+11.【季节/日期敏感规则】如果用户提供了具体日期或季节信息：
+  a) weather字段的temp_range要根据季节给出合理气温（冬季给低温范围如"-15~-2℃"，夏季给高温范围如"22~38℃"），conditions要列出该季节典型天气（如春季"风沙""早晚温差大"、夏季"紫外线强""午后雷阵雨"、秋季"干燥""昼夜温差大"、冬季"积雪""道路结冰"）。
+  b) 景点推荐要排除当季关闭或观赏性差的景点（如冬季排除高海拔未开放景点），优先推荐当季最佳景点。
+  c) 预算和价格必须反映淡旺季：旺季（7-8月暑假、10月国庆、1-2月春节寒假）价格上浮，淡季（11-12月、3月）价格下调。items中说明项需注明价格依据（如"旺季门票150元/人""淡季住宿120元/晚"）。
+  d) timeline时间点要根据季节调整：夏季日照长可排到18:00-19:00结束，冬季日照短应在16:00-17:00前收队。
+  e) weather.packing的衣服要根据气温：夏季短袖+防晒衣+薄外套，春秋卫衣+外套，冬季羽绒服+保暖内衣+手套围巾。
+  f) 景点描述中要提到当季看点（如"9月底正是北疆秋色最浓时""7月草原鲜花盛开"）。`;
 
 function buildUserPrompt(d) {
   const parts = [];
@@ -450,7 +493,37 @@ function buildUserPrompt(d) {
     parts.push('\u89c4\u5212\u4e00\u4e2a'+d.days+'\u5929\u7684\u65c5\u884c\u3002');
     parts.push('\u3010\u786c\u6027\u8981\u6c42\u3011days\u6570\u7ec4\u5fc5\u987b\u6709\u4e14\u4ec5\u6709'+d.days+'\u4e2a\u5143\u7d20\uff0cDay1\u5230Day'+d.days+'\uff0c\u4e00\u4e2a\u4e0d\u80fd\u5c11\uff01');
   } else {
-    parts.push('\u4ece'+d.start_date+'\u5230'+d.end_date+'\u7684\u65c5\u884c\u3002');
+    // ═══ 日期范围模式：自动推断季节、淡旺季、气温 ═══
+    const sDate = new Date(d.start_date + 'T00:00:00');
+    const eDate = new Date(d.end_date + 'T00:00:00');
+    const rangeDays = Math.ceil((eDate - sDate) / 86400000) + 1;
+    const months = [sDate.getMonth() + 1, eDate.getMonth() + 1];
+    const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+    const datesStr = d.start_date + ' 至 ' + d.end_date + '（共' + rangeDays + '天，' + monthNames[sDate.getMonth()] + monthNames[sDate.getDay()] + '日出发）';
+
+    // 季节判断（北半球）
+    const avgMonth = (months[0] + months[1]) / 2;
+    let season, seasonHint;
+    if (avgMonth >= 3 && avgMonth <= 5) { season = '春季'; seasonHint = '气温回暖但早晚温差大，可能有风沙或春雨，植被渐绿，花季（杏花3月底-4月中、桃花4月、薰衣草5-6月）。'; }
+    else if (avgMonth >= 6 && avgMonth <= 8) { season = '夏季'; seasonHint = '高温、旺季。景区全部开放，草原最绿、湖水最美。但注意防晒、防蚊、备足饮用水。价格全年最高，需提前预订。'; }
+    else if (avgMonth >= 9 && avgMonth <= 11) { season = '秋季'; seasonHint = '气温舒适，秋色绝美（9月底-10月是北疆/川西彩林黄金期）。游客减少，价格回落。10月下旬后高海拔开始降温降雪。'; }
+    else { season = '冬季'; seasonHint = '寒冷，降雪/结冰。部分高海拔景区关闭或限行。但雪景极美，机票酒店全年最低价。冬季热门：温泉、滑雪、冰瀑。需备防滑链、防寒装备。'; }
+
+    // 淡旺季判断
+    let peakLevel;
+    if ([1,2,3,7,8,10].some(m => months.includes(m))) { peakLevel = '热门时段（旺季/黄金周/寒假），机票、酒店、门票价格处于高位，需提前预订。'; }
+    else if ([4,5,9].includes(Math.round(avgMonth))) { peakLevel = '平季，价格适中，游客适中，是性价比最高的出行时段。'; }
+    else { peakLevel = '淡季，游客少、价格低，部分景区可能减价或维护，但体验安静深度。'; }
+
+    // 确定天数用于硬性要求
+    d.days = rangeDays;
+
+    parts.push('从' + datesStr + '的旅行。');
+    parts.push('【硬性要求】days数组必须有且仅有' + rangeDays + '个元素，Day1到Day' + rangeDays + '，一个不能少！');
+    parts.push('【季节信息】当前是' + season + '。' + seasonHint);
+    parts.push('【淡旺季】' + peakLevel);
+    parts.push('【⚠️ 以下信息请根据当地实际情况判断，结合常识给出推荐。以下为参考数据】');
+    parts.push('【季节影响】请根据' + season + '特点调整：1)天气预报需给出该季节典型气温范围和可能的天气状况；2)推荐景点要考虑该季节的可看性（如花季推花海、秋季推红叶、冬季推雪景温泉）；3)门票价格应反映旺季/淡季差异（旺季门票可能是淡季的1.2-1.5倍）；4)住宿价格根据' + peakLevel + '调整（旺季上浮30-50%，淡季下浮20-40%）；5)交通价格根据' + peakLevel + '调整（旺季机票折扣少，淡季可能5折以下）；6)日照时长不同季节不同，请据此调整每天时间安排（夏季长日照可安排晚6-7点结束，冬季应提前到4-5点收队）。');
   }
   const pp = [];
   if (d.adults) pp.push(d.adults+'\u6210\u4eba');
@@ -463,7 +536,24 @@ function buildUserPrompt(d) {
   parts.push('\u5f53\u5730\u4ea4\u901a\uff1a'+d.localTransport+'\u3002');
   parts.push('\u4f4f\u5bbf\uff1a'+d.accommodation+'\u3002');
   const imap={'\u9ad8':'\u7d27\u51d1\u6253\u5361\u65e9\u51fa\u665a\u5f52','\u4e2d':'\u677e\u7d27\u9002\u5ea6\u6bcf\u5929\u6709\u91cd\u70b9','\u4f4e':'\u8f7b\u677e\u4f11\u95f2\u7761\u5230\u81ea\u7136\u9192'};
-  parts.push('\u8f9b\u82e6\u7a0b\u5ea6\uff1a'+d.intensity+'\u3002'+imap[d.intensity]||'');
+  parts.push('\u8f9b\u82e6\u7a0b\u5ea6\uff1a'+d.intensity+'\u3002'+(imap[d.intensity]||''));
+  // 旅行模式：目的地旅游 vs 过程探索
+  if (d.travelMode === 'journey') {
+    parts.push('【旅行模式：过程探索】你这次旅行是"边走边游"型，不必从目的地返回出发地。路线不要选最短路，而是要在设置的天数内尽量途经沿途的经典景点，就算绕一点路也要把沿途值得去的地方串起来。每天从一个地方出发，傍晚到另一个地方住宿，一直向前推进，不回头。');
+  } else {
+    parts.push('【旅行模式：目的地旅游】从出发地到目的地的往返旅行，可以考虑回程。');
+  }
+  // 景点偏好
+  const prefMap = {
+    'nature': '请重点推荐自然风光类景点（山水、湖泊、草原、峡谷、雪山、森林、海滩等），人文景点可少一些。路线以观景为主，每天安排足够时间停留拍摄。',
+    'culture': '请重点推荐人文历史类景点（古城、寺庙、博物馆、历史遗迹、非遗体验、老街、民俗村寨等）。每天至少安排1-2个人文体验点，自然风光作为辅助。',
+    'family': '这次出行包含亲子家庭，请重点推荐适合带小朋友的景点（动物园、海洋馆、科技馆、主题乐园、轻松的步道、互动体验项目等）。每天节奏不宜太赶，确保有休息和玩的时间。避免纯成人向的枯燥景点。',
+    'balanced': '请综合推荐各类景点，自然风光和人文体验各占一半，兼顾深度与轻松感。'
+  };
+  parts.push('【景点偏好】'+(prefMap[d.preference] || prefMap['balanced']));
+  if (d.specialNotes && d.specialNotes.trim()) {
+    parts.push('【用户特别说明（最高优先级）】以下是用户自己的特别要求，你必须严格遵守并在行程中充分体现：' + d.specialNotes.trim());
+  }
   parts.push('\u6bcf\u65e5\u9a7e\u8f66\u2264'+d.driveTime+'\u5c0f\u65f6\uff0c\u4e25\u683c\u9075\u5b88\u3002');
   const alt = d.altitude;
   if (alt !== '\u4e0d\u9650') parts.push('\u666f\u70b9\u6d77\u62d4\u5fc5\u987b\u2264'+alt+'\u7c73\uff0c\u907f\u5f00\u9ad8\u6d77\u62d4\u3002');
